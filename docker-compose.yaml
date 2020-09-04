@@ -1,0 +1,9 @@
+version: "2" 
+services: 
+  taskcenter: 
+    image: taskcenter
+    restart: always
+    environment:
+      - redis_url=redis://172.17.0.1
+    ports: 
+      - 8000:80

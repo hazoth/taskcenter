@@ -1,0 +1,12 @@
+__pycache__
+.git
+.gitignore
+.dockerignore
+.idea
+.vscode
+logs
+tests
+Dockerfile
+build.sh
+docker-compose.yaml
+
