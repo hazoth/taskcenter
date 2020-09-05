@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, Body
+from fastapi.responses import ORJSONResponse
 from pydantic import BaseModel
 import json
 import base64
@@ -53,6 +54,7 @@ class RClearQueue(BaseResponse):
 @router.post(
     '/clear_queue',
     response_model=RClearQueue,
+    response_class=ORJSONResponse,
 )
 async def api_clear_queue(
     param: PClearQueue,
@@ -79,6 +81,7 @@ class RListQueue(BaseResponse):
 @router.post(
     '/list_queue',
     response_model=RListQueue,
+    response_class=ORJSONResponse,
 )
 async def api_list_queue(
     param: PListQueue,
@@ -101,6 +104,7 @@ class RStatQueue(BaseResponse):
 @router.post(
     '/stat_queue',
     response_model=RStatQueue,
+    response_class=ORJSONResponse,
 )
 async def api_stat_queue(
     queue: str = Body(..., embed=True),
@@ -151,6 +155,7 @@ class RCallTask(BaseResponse):
     '/call',
     response_model=RCallTask,
     # response_model_exclude_none=True,
+    response_class=ORJSONResponse,
 )
 async def api_call(
     param: PCallTask,
@@ -191,6 +196,7 @@ class RPutTask(BaseResponse):
 @router.post(
     '/put',
     response_model=RPutTask,
+    response_class=ORJSONResponse,
 )
 async def api_put_task(
     param: PPutTask,
@@ -227,6 +233,7 @@ class RPeekTasks(BaseResponse):
 @router.post(
     '/peek',
     response_model=RPeekTasks,
+    response_class=ORJSONResponse,
 )
 async def api_peek_tasks(
     param: PPeekTasks,
@@ -267,6 +274,7 @@ class RAcquireTasks(BaseResponse):
 @router.post(
     '/acquire',
     response_model=RAcquireTasks,
+    response_class=ORJSONResponse,
 )
 async def api_acquire_tasks(
     param: PAcquireTasks,
@@ -301,6 +309,7 @@ class RReplyTask(BaseResponse):
 @router.post(
     '/reply',
     response_model=RReplyTask,
+    response_class=ORJSONResponse,
 )
 async def api_reply_task(
     param: PReplyTask,
@@ -326,7 +335,8 @@ class RRemoveTask(BaseResponse):
 
 @router.post(
     '/remove',
-    response_model=RRemoveTask
+    response_model=RRemoveTask,
+    response_class=ORJSONResponse,
 )
 async def api_remove_task(
     param: PRemoveTask,
