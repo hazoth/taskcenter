@@ -224,7 +224,7 @@ class TaskManager:
         queue: str,
         cursor: Optional[str],
         size: int,
-        timeout: int=0,
+        timeout: int,
     ) -> List[PeekResult]:
         if not cursor:
             cursor = '0'

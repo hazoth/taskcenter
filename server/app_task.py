@@ -187,6 +187,7 @@ class RPeekTaskData(BaseModel):
 
 class RPeekTasks(BaseResponse):
     data: List[RPeekTaskData]
+    cursor: Optional[str]
 
 
 @router.post(
@@ -208,7 +209,8 @@ async def api_peek_tasks(
             id=i.id,
             info=json.loads(i.info.decode()),
             cursor=i.cursor,
-        ) for i in result]
+        ) for i in result],
+        cursor = (result[-1] if result else param).cursor,
     )
 
 
