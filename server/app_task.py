@@ -23,7 +23,6 @@ class BaseResponse(BaseModel):
 
 # @router.post(
 #     '/create_queue',
-#     name='创建消息队列',
 # )
 # async def api_create_queue(
 #     queue: str,

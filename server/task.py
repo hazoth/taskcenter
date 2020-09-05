@@ -4,6 +4,7 @@ from enum import IntEnum
 from typing import Optional, List
 import weakref
 import asyncio
+import logging
 
 
 class TaskConfig(BaseModel):
@@ -92,27 +93,29 @@ class TaskManager:
         channels = await redis_client.subscribe(self.name_reply_channel())
         ch:aioredis.Channel = channels[0]
         while (await ch.wait_message()):
-            key = await ch.get()
-            event = self.get_task_done_event(key)
-            if event is None:
-                continue
-            if event.is_set():
+            try:
+                key = await ch.get()
+                event = self.get_task_done_event(key)
+                if event is None:
+                    continue
+                if not event.is_set():
+                    result = await redis_client.hmget(
+                        key,
+                        'id',
+                        'task_done',
+                        'result_info',
+                        'result_content',
+                    )
+                    if result[1]:
+                        event.set(TaskResult(
+                            info=result[2],
+                            content=result[3],
+                        ))
+                    else:
+                        event.set(None)
                 del event
-                continue
-            result = await redis_client.hmget(
-                key,
-                'id',
-                'task_done',
-                'result_info',
-                'result_content',
-            )
-            if result[1]:
-                event.set(TaskResult(
-                    result[2],
-                    result[3],
-                ))
-            else:
-                event.set(None)
+            except Exception as e:
+                logging.exception(e)
         return
 
     async def unsubscribe_reply(self):
