@@ -1,11 +1,11 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Body
 from pydantic import BaseModel
 import json
 import base64
 from enum import Enum
 from typing import Optional, List, Any
 import asyncio
-from .task import TaskConfig
+from .task import QueueStat, TaskConfig
 from .task import TaskManager, get_task_manager
 
 
@@ -66,13 +66,48 @@ async def api_clear_queue(
     return RClearQueue(data=result)
 
 
-# @router.post(
-#     '/stat'
-# )
-# async def api_stat(
-#     queue_list: Optional[List[str]]=None,
-# ):
-#     pass
+class PListQueue(BaseModel):
+    cursor: Optional[str] = None
+    size: int
+
+
+class RListQueue(BaseResponse):
+    data: List[str]
+    cursor: Optional[str]
+
+
+@router.post(
+    '/list_queue',
+    response_model=RListQueue,
+)
+async def api_list_queue(
+    param: PListQueue,
+    tm: TaskManager = Depends(get_task_manager),
+):
+    keys, cursor = await tm.list_queue(
+        param.cursor,
+        param.size,
+    )
+    return RListQueue(
+        data=keys,
+        cursor=cursor,
+    )
+
+
+class RStatQueue(BaseResponse):
+    data: Optional[QueueStat]
+
+
+@router.post(
+    '/stat_queue',
+    response_model=RStatQueue,
+)
+async def api_stat_queue(
+    queue: str = Body(..., embed=True),
+    tm: TaskManager = Depends(get_task_manager),
+):
+    result = await tm.stat_queue(queue)
+    return RStatQueue(data=result)
 
 
 # @router.post(

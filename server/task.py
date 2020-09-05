@@ -1,10 +1,16 @@
 import aioredis
 from pydantic import BaseModel, BaseSettings, Json
 from enum import IntEnum
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import weakref
 import asyncio
 import logging
+
+
+class QueueStat(BaseModel):
+    length: int
+    oldest_cursor: Optional[str]
+    newest_cursor: Optional[str]
 
 
 class TaskConfig(BaseModel):
@@ -374,8 +380,7 @@ class TaskManager:
         queue: str,
         iter_num: int,
         step_size: int,
-    ):
-        await self._redis.delete(self.name_stream(queue))
+    ) -> bool:
         cursor = 0
         for _ in range(iter_num):
             cursor, keys = await self._redis.scan(
@@ -385,9 +390,43 @@ class TaskManager:
             )
             if keys:
                 await self._redis.delete(*keys)
-            if cursor == 0:
+            if int(cursor) == 0:
+                await self._redis.delete(self.name_stream(queue))
                 return True
         return False
+
+    async def list_queue(
+        self,
+        cursor: Optional[str],
+        size: int,
+    ) -> Tuple[List[str], str]:
+        if not cursor:
+            cursor = '0'
+        cursor, keys = await self._redis.scan(
+            cursor=cursor or 0,
+            match=self.name_stream('*'),
+            count=size,
+        )
+        cursor = None if int(cursor) == 0 else str(cursor)
+        plen = len(self.name_stream(''))
+        keys = [i.decode()[plen:] for i in keys]
+        return keys, cursor
+
+    async def stat_queue(
+        self,
+        queue: str,
+    ) -> Optional[QueueStat]:
+        try:
+            result = await self._redis.xinfo_stream(
+                self.name_stream(queue),
+            )
+        except aioredis.errors.ReplyError as e:
+            return None
+        return QueueStat(
+            length=result[b'length'],
+            oldest_cursor=(result[b'first-entry'] or (None,))[0],
+            newest_cursor=(result[b'last-entry'] or (None,))[0],
+        )
 
 
 class Settings(BaseSettings):
