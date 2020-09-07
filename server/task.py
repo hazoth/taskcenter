@@ -468,7 +468,7 @@ async def get_task_manager() -> TaskManager:
             client=redis_client,
             channel_name=name_reply_channel(settings.redis_prefix),
         )
-        from . import task_redis as redis_helper
+        from . import task_aredis as redis_helper
         redis_client = await redis_helper.create_client(
             settings.redis_host,
             settings.redis_port,
