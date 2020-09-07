@@ -1,4 +1,18 @@
 import aredis
+from aredis.utils import pairs_to_dict
+
+
+# fix parse_xinfo_stream
+def parse_xinfo_stream(response):
+    res = pairs_to_dict(response)
+    if res[b'first-entry']:
+        res[b'first-entry'][1] = pairs_to_dict(res[b'first-entry'][1])
+    if res[b'last-entry']:
+        res[b'last-entry'][1] = pairs_to_dict(res[b'last-entry'][1])
+    return res
+
+
+aredis.StrictRedis.RESPONSE_CALLBACKS['XINFO STREAM'] = parse_xinfo_stream
 
 
 class RedisWrapper:
@@ -35,12 +49,11 @@ class RedisWrapper:
         return lst
 
     async def xinfo_stream(self, stream):
-        result = await self._c.xinfo_stream(stream)
-        return {
-            b'length': result['length'],
-            b'first-entry': result['first-entry'],
-            b'last-entry': result['last-entry'],
-        }
+        try:
+            result = await self._c.xinfo_stream(stream)
+        except aredis.exceptions.ResponseError as e:
+            return None
+        return result
 
     async def close(self):
         self._c.close()

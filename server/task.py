@@ -432,6 +432,8 @@ class TaskManager:
         result = await self._redis.xinfo_stream(
             self.name_stream(queue),
         )
+        if not result:
+            return None
         return QueueStat(
             length=result[b'length'],
             oldest_cursor=(result[b'first-entry'] or (None,))[0],

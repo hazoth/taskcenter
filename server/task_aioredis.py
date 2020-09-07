@@ -35,11 +35,7 @@ class RedisWrapper:
             result = await self._c.xinfo_stream(stream)
         except aioredis.errors.ReplyError as e:
             return None
-        return {
-            b'length': result[b'length'],
-            b'first-entry': result[b'first-entry'],
-            b'last-entry': result[b'last-entry'],
-        }
+        return result
 
     async def close(self):
         self._c.close()

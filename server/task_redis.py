@@ -35,12 +35,11 @@ class RedisWrapper:
         return lst
 
     async def xinfo_stream(self, stream):
-        result = self._c.xinfo_stream(stream)
-        return {
-            b'length': result['length'],
-            b'first-entry': result['first-entry'],
-            b'last-entry': result['last-entry'],
-        }
+        try:
+            result = self._c.xinfo_stream(stream)
+        except redis.exceptions.ResponseError as e:
+            return None
+        return {i.encode(): j for i,j in result.items()}
 
     async def close(self):
         self._c.close()
