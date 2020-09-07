@@ -1,10 +1,10 @@
-import aioredis
 from pydantic import BaseModel, BaseSettings, Json
 from enum import IntEnum
 from typing import Optional, List, Tuple
 import weakref
 import asyncio
 import logging
+from .task_aioredis import RedisWrapper, PubSubWrapper
 
 
 class QueueStat(BaseModel):
@@ -66,20 +66,26 @@ class TaskDoneEvent:
         return self.result
 
 
+def name_reply_channel(prefix):
+    return f'{prefix}:reply'.encode()
+
+
 class TaskManager:
     def __init__(
         self,
-        redis_client: aioredis.Redis,
+        redis_client: RedisWrapper,
+        redis_pubsub: PubSubWrapper,
         redis_prefix: str,
     ):
         self._redis = redis_client
+        self._redis_pubsub = redis_pubsub
         self._redis_prefix = redis_prefix
         self._task_done_events = weakref.WeakValueDictionary()
         self._running_tasks = [
             # before python 3.7
             # asyncio.ensure_future(self.subscribe_reply())
             # after python 3.7
-            asyncio.create_task(self.subscribe_reply())
+            asyncio.create_task(self.handle_subscribe())
         ]
 
     def name_queue(self, queue: str):
@@ -92,20 +98,19 @@ class TaskManager:
         return f'{self._redis_prefix}:task:{queue}:{id}'.encode()
 
     def name_reply_channel(self):
-        return f'{self._redis_prefix}:reply'.encode()
+        return name_reply_channel(self._redis_prefix)
 
-    async def subscribe_reply(self):
-        redis_client = self._redis
-        channels = await redis_client.subscribe(self.name_reply_channel())
-        ch:aioredis.Channel = channels[0]
-        while (await ch.wait_message()):
+    async def handle_subscribe(self):
+        while True:
             try:
-                key = await ch.get()
+                key = await self._redis_pubsub.get_message()
+                if key is None:
+                    break
                 event = self.get_task_done_event(key)
                 if event is None:
                     continue
                 if not event.is_set():
-                    result = await redis_client.hmget(
+                    result = await self._redis.hmget(
                         key,
                         'id',
                         'task_done',
@@ -123,15 +128,6 @@ class TaskManager:
             except Exception as e:
                 logging.exception(e)
         return
-
-    async def unsubscribe_reply(self):
-        return await self._redis.unsubscribe(self.name_reply_channel())
-
-    async def close(self):
-        await self.unsubscribe_reply()
-        await asyncio.sleep(0.1)
-        self._redis.close()
-        await self._redis.wait_closed()
 
     def get_task_done_event(
         self,
@@ -193,7 +189,7 @@ class TaskManager:
     ) -> bool:
         script = '''
         if (redis.call('exists', KEYS[1]) == 1) then
-            return ''
+            return nil
         else
             local sid = redis.call(
                 'xadd',
@@ -317,33 +313,50 @@ class TaskManager:
                 content=content,
             ))
         # set result
-        await self._redis.watch(key)
-        try:
-            config, sid = await self._redis.hmget(
-                key,
-                'config',
-                'cursor',
-            )
-            if not config:
-                return False
-            config = TaskConfig.parse_raw(config)
-            p = self._redis.multi_exec()
-            if sid:
-                r = p.xdel(self.name_stream(queue), sid)
-            if config.cache_result_time:
-                p.hmset(
-                    key,
+        config, sid = await self._redis.hmget(
+            key,
+            'config',
+            'cursor',
+        )
+        if not config:
+            return False
+        config = TaskConfig.parse_raw(config)
+        script = '''
+            local sid = redis.call('hget', KEYS[1], 'cursor')
+            if (sid ~= ARGV[1]) then
+                return nil
+            end
+            redis.call('xdel', KEYS[2], ARGV[1])
+            if (tonumber(ARGV[4]) > 0) then
+                redis.call(
+                    'hmset', KEYS[1],
                     'task_done', 1,
-                    'result_info', info,
-                    'result_content', content,
+                    'result_info', ARGV[2],
+                    'result_content', ARGV[3]
                 )
-                p.expire(key, config.cache_result_time)
-            else:
-                p.delete(key)
-            p.publish(self.name_reply_channel(), key)
-            r = await p.execute()
-        finally:
-            r = await self._redis.unwatch()
+                redis.call('expire', KEYS[1], ARGV[4])
+            else
+                redis.call('del', KEYS[1])
+            end
+            redis.call('publish', ARGV[5], KEYS[1])
+            return 1
+        '''
+        result = await self._redis.eval(
+            script,
+            keys=[
+                key,
+                self.name_stream(queue),
+            ],
+            args=[
+                sid,
+                info,
+                content,
+                config.cache_result_time,
+                self.name_reply_channel(),
+            ],
+        )
+        if not result:
+            return False
         if config.forward_result_to:
             await self.put_task(
                 queue=config.forward_result_to,
@@ -416,21 +429,25 @@ class TaskManager:
         self,
         queue: str,
     ) -> Optional[QueueStat]:
-        try:
-            result = await self._redis.xinfo_stream(
-                self.name_stream(queue),
-            )
-        except aioredis.errors.ReplyError as e:
-            return None
+        result = await self._redis.xinfo_stream(
+            self.name_stream(queue),
+        )
         return QueueStat(
             length=result[b'length'],
             oldest_cursor=(result[b'first-entry'] or (None,))[0],
             newest_cursor=(result[b'last-entry'] or (None,))[0],
         )
 
+    async def close(self):
+        await self._redis_pubsub.close()
+        await self._redis.close()
+
 
 class Settings(BaseSettings):
     redis_url: str = 'redis://127.0.0.1'
+    redis_host: str = '127.0.0.1'
+    redis_port: int = 6379
+    redis_db: int = 0
     redis_prefix: str = 'tc'
 
 
@@ -441,11 +458,25 @@ class Static:
 async def get_task_manager() -> TaskManager:
     if Static.task_manager is None:
         settings = Settings()
-        redis_client = await aioredis.create_redis_pool(
-            settings.redis_url,
+        from . import task_aioredis as redis_helper
+        redis_client = await redis_helper.create_client(
+            settings.redis_host,
+            settings.redis_port,
+            settings.redis_db,
+        )
+        redis_pubsub = await redis_helper.create_pubsub(
+            client=redis_client,
+            channel_name=name_reply_channel(settings.redis_prefix),
+        )
+        from . import task_redis as redis_helper
+        redis_client = await redis_helper.create_client(
+            settings.redis_host,
+            settings.redis_port,
+            settings.redis_db,
         )
         Static.task_manager = TaskManager(
             redis_client,
+            redis_pubsub,
             settings.redis_prefix,
         )
     return Static.task_manager

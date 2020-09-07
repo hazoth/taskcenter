@@ -170,7 +170,7 @@ async def api_call(
             config=param.config or TaskConfig(),
             timeout=param.timeout,
         )
-    except asyncio.exceptions.TimeoutError as e:
+    except asyncio.TimeoutError as e:
         return RCallTask(err_code=ErrorCode.TIMEOUT)
     if result is None:
         return RCallTask()
